@@ -3,19 +3,25 @@ name: build
 on:
   push:
     branches:
-      - master
+      - "*"
   pull_request:
     branches:
-      - master
+      - "*"
 
 jobs:
   build:
+    concurrency:
+      group: ${{ github.ref }}
+      cancel-in-progress: true
+
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
         with:
-          go-version: "1.27"
-      - run: go vet ./...
-      - run: go build -o oidc-cli .
-      - run: ./oidc-cli -h
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 1.16.x
+      - name: Make all
+        run: make all
