@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"html"
 	"io"
@@ -15,6 +14,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"oidc-cli/pkg"
 )
@@ -29,40 +30,22 @@ type TokenResponse struct {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("oidc-cli version %s", pkg.BuildString())
-		if pkg.BuildDateString() != "" {
-			fmt.Printf(" (built %s)", pkg.BuildDateString())
-		}
-		if pkg.GitCommit != "" {
-			fmt.Printf(", commit: %s", pkg.GitCommit)
-		}
-		fmt.Println()
-		return
-	}
-
-	issuer := flag.String("issuer", "", "Signet issuer base URL (required)")
-	clientID := flag.String("client-id", "", "OAuth client id")
-	clientSecret := flag.String("client-secret", "", "OAuth client secret")
-	username := flag.String("username", "", "Signet username")
-	password := flag.String("password", "", "Signet password")
-	port := flag.Int("redirect-port", 9999, "port matching the client's registered redirect URL")
-	flag.Parse()
-
-	if *issuer == "" || *clientID == "" || *username == "" || *password == "" {
-		flag.Usage()
+	command := rootCommand()
+	if err := command.Execute(); err != nil {
 		os.Exit(1)
 	}
-	*issuer = strings.TrimRight(*issuer, "/")
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", *port)
+}
+
+func runLogin(issuer, clientID, clientSecret, username, password string, port int) {
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 
 	verifier := randomString(48)
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	state := randomString(16)
 
-	authURL := fmt.Sprintf("%s/authorize?%s", *issuer, url.Values{
-		"client_id":             {*clientID},
+	authURL := fmt.Sprintf("%s/authorize?%s", issuer, url.Values{
+		"client_id":             {clientID},
 		"response_type":         {"code"},
 		"redirect_uri":          {redirectURI},
 		"scope":                 {"openid profile email"},
@@ -86,11 +69,11 @@ func main() {
 		fatal("no login form found at %s", authURL)
 	}
 	if !strings.HasPrefix(formAction, "http") {
-		formAction = *issuer + formAction
+		formAction = issuer + formAction
 	}
 
 	// 2. POST credentials, do not follow the redirect to the callback
-	form := url.Values{"username": {*username}, "password": {*password}}
+	form := url.Values{"username": {username}, "password": {password}}
 	code, cbState, err := exchangeForm(client, formAction, form, redirectURI)
 	if err != nil {
 		fatal("login: %v", err)
@@ -100,7 +83,7 @@ func main() {
 	}
 
 	// 3. Exchange the code at /token (PKCE + secret)
-	tokenURL := *issuer + "/token"
+	tokenURL := issuer + "/token"
 	tr := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -108,7 +91,7 @@ func main() {
 		"code_verifier": {verifier},
 	}
 	req, _ := http.NewRequest("POST", tokenURL, strings.NewReader(tr.Encode()))
-	req.SetBasicAuth(*clientID, *clientSecret)
+	req.SetBasicAuth(clientID, clientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err = client.Do(req)
 	if err != nil {
@@ -248,4 +231,53 @@ func fatal(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, "oidc-cli: "+f+"\n", a...)
 	bufio.NewReader(os.Stdin)
 	os.Exit(1)
+}
+
+func rootCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "oidc-cli",
+		Short:   "Perform a full OIDC Authorization Code + PKCE login against Signet",
+		Example: `  oidc-cli --issuer https://signet.example.com --client-id my-cli --client-secret <secret> --username alex --password <password>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			issuer, _ := cmd.Flags().GetString("issuer")
+			clientID, _ := cmd.Flags().GetString("client-id")
+			clientSecret, _ := cmd.Flags().GetString("client-secret")
+			username, _ := cmd.Flags().GetString("username")
+			password, _ := cmd.Flags().GetString("password")
+			port, _ := cmd.Flags().GetInt("redirect-port")
+
+			if issuer == "" || clientID == "" || username == "" || password == "" {
+				return fmt.Errorf("flags --issuer, --client-id, --username and --password are required")
+			}
+
+			runLogin(strings.TrimRight(issuer, "/"), clientID, clientSecret, username, password, port)
+			return nil
+		},
+		SilenceUsage:  true,
+		SilenceErrors: false,
+	}
+
+	cmd.Flags().String("issuer", "", "Signet issuer base URL (required)")
+	cmd.Flags().String("client-id", "", "OAuth client id")
+	cmd.Flags().String("client-secret", "", "OAuth client secret")
+	cmd.Flags().String("username", "", "Signet username")
+	cmd.Flags().String("password", "", "Signet password")
+	cmd.Flags().Int("redirect-port", 9999, "port matching the client's registered redirect URL")
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print the version",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("oidc-cli version %s", pkg.BuildString())
+			if pkg.BuildDateString() != "" {
+				fmt.Printf(" (built %s)", pkg.BuildDateString())
+			}
+			if pkg.GitCommit != "" {
+				fmt.Printf(", commit: %s", pkg.GitCommit)
+			}
+			fmt.Println()
+		},
+	})
+
+	return cmd
 }
