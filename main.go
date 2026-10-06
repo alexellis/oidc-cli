@@ -109,7 +109,7 @@ func main() {
 		fatal("parse token response: %v", err)
 	}
 
-	out, _ := json.MarshalIndent(map[string]any{
+	out, _ := json.MarshalIndent(map[string]interface{}{
 		"token_type":    tok.TokenType,
 		"expires_in":    tok.ExpiresIn,
 		"scope":         tok.Scope,
@@ -196,7 +196,7 @@ func stripTags(s string) string {
 	return out.String()
 }
 
-func decodeJWT(tok string) (map[string]any, error) {
+func decodeJWT(tok string) (map[string]interface{}, error) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("not a JWT")
@@ -205,7 +205,7 @@ func decodeJWT(tok string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var m map[string]any
+	var m map[string]interface{}
 	return m, json.Unmarshal(payload, &m)
 }
 
@@ -217,7 +217,7 @@ func randomString(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func fatal(f string, a ...any) {
+func fatal(f string, a ...interface{}) {
 	fmt.Fprintf(os.Stderr, "oidc-cli: "+f+"\n", a...)
 	bufio.NewReader(os.Stdin)
 	os.Exit(1)
