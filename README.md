@@ -93,3 +93,4 @@ Exit codes are non-zero on any failure, including wrong credentials
 ## License
 
 MIT
+
