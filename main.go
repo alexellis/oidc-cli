@@ -15,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"oidc-cli/pkg"
 )
 
 type TokenResponse struct {
@@ -27,6 +29,18 @@ type TokenResponse struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Printf("oidc-cli version %s", pkg.BuildString())
+		if pkg.BuildDateString() != "" {
+			fmt.Printf(" (built %s)", pkg.BuildDateString())
+		}
+		if pkg.GitCommit != "" {
+			fmt.Printf(", commit: %s", pkg.GitCommit)
+		}
+		fmt.Println()
+		return
+	}
+
 	issuer := flag.String("issuer", "", "Signet issuer base URL (required)")
 	clientID := flag.String("client-id", "", "OAuth client id")
 	clientSecret := flag.String("client-secret", "", "OAuth client secret")
@@ -58,6 +72,7 @@ func main() {
 	}.Encode())
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	client.Transport = userAgentTransport{pkg.UserAgent(), http.DefaultTransport}
 
 	// 1. GET the login form
 	resp, err := client.Get(authURL)
@@ -109,7 +124,7 @@ func main() {
 		fatal("parse token response: %v", err)
 	}
 
-	out, _ := json.MarshalIndent(map[string]interface{}{
+	out, _ := json.MarshalIndent(map[string]any{
 		"token_type":    tok.TokenType,
 		"expires_in":    tok.ExpiresIn,
 		"scope":         tok.Scope,
@@ -133,7 +148,8 @@ func main() {
 // callback, intercepts it to capture the authorization code.
 func exchangeForm(client *http.Client, action string, form url.Values, redirectURI string) (string, string, error) {
 	redirClient := &http.Client{
-		Timeout: 30 * time.Second,
+		Transport: userAgentTransport{pkg.UserAgent(), http.DefaultTransport},
+		Timeout:   30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if strings.HasPrefix(req.URL.String(), redirectURI) {
 				return http.ErrUseLastResponse
@@ -196,7 +212,7 @@ func stripTags(s string) string {
 	return out.String()
 }
 
-func decodeJWT(tok string) (map[string]interface{}, error) {
+func decodeJWT(tok string) (map[string]any, error) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("not a JWT")
@@ -205,8 +221,19 @@ func decodeJWT(tok string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	return m, json.Unmarshal(payload, &m)
+}
+
+type userAgentTransport struct {
+	ua string
+	rt http.RoundTripper
+}
+
+func (u userAgentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("User-Agent", u.ua)
+	return u.rt.RoundTrip(r)
 }
 
 func randomString(n int) string {
@@ -217,7 +244,7 @@ func randomString(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func fatal(f string, a ...interface{}) {
+func fatal(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, "oidc-cli: "+f+"\n", a...)
 	bufio.NewReader(os.Stdin)
 	os.Exit(1)
