@@ -6,7 +6,7 @@ LDFLAGS := "-s -w \
 	-X oidc-cli/pkg.Version=$(Version)$(IsDirty) \
 	-X oidc-cli/pkg.GitCommit=$(GitCommit) \
 	-X oidc-cli/pkg.BuildTimestamp=$(BuildTimestamp)"
-SOURCE_DIRS = . pkg
+SOURCE_FILES = $(shell git ls-files '*.go' ':!:vendor/*')
 export GO111MODULE=on
 
 .PHONY: all
@@ -18,7 +18,7 @@ build:
 
 .PHONY: gofmt
 gofmt:
-	@test -z $(shell gofmt -l -s $(SOURCE_DIRS) ./ | tee /dev/stderr) || (echo "[WARN] Fix formatting issues with 'make gofmt'" && exit 1)
+	@test -z "$(shell gofmt -l -s $(SOURCE_FILES) | tee /dev/stderr)" || (echo "[WARN] Fix formatting issues with 'make gofmt'" && exit 1)
 
 .PHONY: test
 test:
